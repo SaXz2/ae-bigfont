@@ -1,6 +1,8 @@
 # AE BigFont — 放大 After Effects 界面字体
 
 After Effects 从来不给 UI 字号设置，中文版默认还是宋体 9–12px，2K/4K 屏上看着很吃力。
+配套的字体替换（宋体 → 微软雅黑）见 [adobe-no-simsun](https://github.com/scrpr/adobe-no-simsun)，两者可叠加。
+
 这个工具用 **Frida 运行时 hook** 把 AE 界面所有文字的渲染字号按倍数放大，**不修改任何 Adobe 文件**，也不会破坏语言包签名。
 
 ```
@@ -57,9 +59,31 @@ $lnk.IconLocation = "C:\Program Files\Adobe\Adobe After Effects 2025\Support Fil
 $lnk.Save()
 ```
 
-### 换字体（可选）
+### 配合「宋体 → 微软雅黑」
 
-字号解决了，字体本身也换掉的话，用 [adobe-no-simsun](https://github.com/scrpr/adobe-no-simsun) 把 `dvaui.dll` 里的 `SimSun` 改成 `Microsoft YaHei UI`，两者互不冲突。
+字号放大解决的是「小」，字形本身还是宋体的话，2K 屏上笔画偏细。AE 的 UI 字体名是**硬编码在 `dvaui.dll` 里**的，没有设置项，但可以打一个 38 字节的补丁换成系统里已有的字体。
+
+工具：[adobe-no-simsun](https://github.com/scrpr/adobe-no-simsun)
+
+```bat
+:: 换成微软雅黑（先关掉 After Effects）
+python adobe_no_simsun.py --product after-effects --font "Microsoft YaHei UI"
+
+:: 想还原
+python adobe_no_simsun.py --product after-effects --restore "<dvaui.dll.bak.no_simsun_xxx 的完整路径>"
+```
+
+它的做法是在 `dvaui.dll` 里模式匹配字体初始化点（`mov r8d,6` + `lea rdx,"SimSun"`），把指针重定向到 .text 尾部空白处写入的新字体名，并改长度立即数。不写死地址，所以小版本升级后通常还能用。
+
+本机实测环境（After Effects 2025 / `dvaui.dll` 25.2.2.2，31,062,472 字节）：
+
+- 整份 DLL 里 `SimSun\0` 只出现 1 次（RVA `0x7dcdf4`），候选初始化点唯一
+- 总共改 38 字节，文件大小不变，不加节，导入表 / 重定位 / 入口点都不动
+- 打完补丁 `objdump -p` 能正常解析，AE 启动无崩溃；原文件备份成 `dvaui.dll.bak.no_simsun_<时间戳>`
+
+**注意不要走另一条路**：改 `Support Files\Dictionaries\zh_CN\after_effects_zh_CN.dat` 里的 `FontStyle/*` 换字体名。那个目录是签名过的 UCF 包（`mimetype` + `META-INF/signatures.xml`），内容改一个字节、甚至只在目录里多放一个文件，`ZXPSign_verify` 就返回 `50`，AE 判定语言包不可用 → 语言回退英文 → 中文订阅授权不匹配 → 启动直接弹 `Licensing Error`，进不去。这条弯路我在同一个 25.2.2 上踩实了。
+
+两者可以叠加：`dvaui.dll` 负责换字形，本工具负责放大字号，互不干扰。
 
 ## 已知限制
 
